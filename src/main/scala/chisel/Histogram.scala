@@ -1,3 +1,5 @@
+package yohan.Histogram1
+
 import chisel3._
 import chisel3.stage.ChiselStage
 import chisel3.util._
@@ -33,6 +35,7 @@ class Domainchanger( domainParams: DomainParams) extends Module {
       (inputIndex.U, inputValue)
     }
     val finalState = indexedSeq :+ (indexedSeq.size.U, endConditionNumber.U)
+//    test_test := indexedSeq.size.U
     finalState
   })
 

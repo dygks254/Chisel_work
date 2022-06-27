@@ -1,3 +1,5 @@
+package yohan.VolumeIntegrator1
+
 import chisel3._
 import chisel3.internal.firrtl._
 import chisel3.stage.ChiselStage
