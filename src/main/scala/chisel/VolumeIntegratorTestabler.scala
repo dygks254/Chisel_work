@@ -1,9 +1,11 @@
 import chisel3._
 import chisel3.stage.ChiselStage
 import chisel3.util._
-import functional.transmitter.ElementTransmitModule
-import yohan.VolumeIntegrator1._
+import yohan.Element._
+import yohan.VolumeIntegrator2._
 
+import scala.collection.mutable
+import scala.collection.mutable.ListBuffer
 import scala.math._
 
 class VolumeIntegratorTestabler extends Module{
@@ -34,14 +36,29 @@ class VolumeIntegratorTestabler extends Module{
     waves.map( aWave => aWave.map(aHeight => aHeight.asInstanceOf[Double].toInt))
   }
 
+  val waves: Seq[Seq[Int]] = fakeWaves(30, 150, 50, 3)
+
   val testableBundle:VolumeIntegratorTestableBundle = IO(new VolumeIntegratorTestableBundle())
-  val volumeIntegrator: VolumeIntegrator = Module(new VolumeIntegrator(VolumeIntegratorParams(maxWaveHeight = 150, inputNumber = 30, timemainFactor = 10)))
-  val transmit: Seq[ElementTransmitModule[UInt]] = fakeWaves(30, 150, 50, 20).map(aWaveSet =>
+  val duration = 15
+  val volumeIntegrator: VolumeIntegrator = Module(new VolumeIntegrator(VolumeIntegratorParams(maxWaveHeight = 150, inputNumber = 30, timemainFactor = duration)))
+  val transmit: Seq[ElementTransmitModule[UInt]] = fakeWaves(30, 200, 50, duration).map(aWaveSet =>
     Module(new ElementTransmitModule[UInt](aWaveSet.map(aWave => aWave.U)))
   )
 
-  volumeIntegrator.io.option := 10.U
 
+  //softwarable Test
+  val avgMutable: ListBuffer[Int] = mutable.ListBuffer[Int]()
+  for (j <- waves.head.indices)
+  {
+    var cummulative = 0
+    for (i <- waves.indices) {
+      cummulative += waves(i)(j)
+    }
+    avgMutable += cummulative / waves.length
+  }
+
+//  val avgSeq: Seq[Int] = avgMutable
+  //softwarable Test End
   transmit.zip(volumeIntegrator.io.in).foreach{ a =>
     a._1.io.generatedDecoupledOutput.ready := true.B
     a._2 := a._1.io.generatedSimpleOutput
@@ -50,6 +67,8 @@ class VolumeIntegratorTestabler extends Module{
   testableBundle.out := volumeIntegrator.io.out
 
 }
+
+
 
 object VolumeIntegratorTestModule extends App{
   (new ChiselStage).emitVerilog(new VolumeIntegratorTestabler())

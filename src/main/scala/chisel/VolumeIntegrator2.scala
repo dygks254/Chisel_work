@@ -6,63 +6,88 @@ import chisel3.util._
 
 import scala.annotation.tailrec
 
-case class VolumeIntegratorParams(maxWaveHeight:Int, inputNumber:Int, timemainFactor:Int, maxOptionIs:Int=1000, addMax:Int = 4){
+case class VolumeIntegratorParams(maxWaveHeight:Int, inputNumber:Int, timemainFactor:Int, maxOptionIs:Int=1000){
   def bitSize(numb : Int): Int = log2Ceil(numb + 1)
-  val inputBits: Int = bitSize(inputNumber)
   val outputBits: Int = bitSize(maxWaveHeight)
-
-  require( inputNumber <= maxOptionIs)
+  val divMax: Int = inputNumber*timemainFactor
+  val bitMax: Int = maxWaveHeight + log2Ceil(divMax+1)
 }
+
 
 class VolumeIntegrator(volumeIntegratorParams:VolumeIntegratorParams) extends Module {
 
+  val addMax = 10
+
   class VolumeIntegratorBundle extends Bundle {
     val in: Vec[UInt] = Input(Vec(volumeIntegratorParams.inputNumber, UInt(volumeIntegratorParams.outputBits.W)))
-    val option: UInt = Input(UInt(volumeIntegratorParams.outputBits.W))
     val out: UInt = Output(UInt(volumeIntegratorParams.outputBits.W))
   }
 
+  class GripperInDelayNCycles[T <: Data](data:T, gripper:Int)(cycle:Int = gripper) extends Module {
+
+    class DelayNCyclesBundle() extends Bundle {
+      val in: T = Input(data)
+      val out: T = Output(data)
+    }
+
+    val delayedBundle: DelayNCyclesBundle = new DelayNCyclesBundle
+    val io:DelayNCyclesBundle = IO(delayedBundle)
+    val delaCon: Vec[UInt] = RegInit(VecInit(Seq.fill(cycle)(0.U(volumeIntegratorParams.bitMax.W))))
+    delaCon(0) := io.in
+    delaCon.tail.foldLeft(delaCon(0))((a,b) => {
+      b := a
+      b
+    })
+    val tempAdd: UInt = delaCon.reduce(_ +& _)
+    io.out := tempAdd
+  }
+
   @tailrec
-  final def AddDiv(inNum : Seq[Int] ): Seq[Int] ={
-    if ( inNum.last < volumeIntegratorParams.addMax){ inNum }
-    else{ AddDiv(inNum :+ (inNum.last/volumeIntegratorParams.addMax)+1 ) }
+  final def AddDiv(inNum : Seq[(Int,Int,Int)]) : Seq[(Int,Int,Int)] = {
+    var tmpDiv = 0
+    if((inNum.last._1)%addMax > 0)  {tmpDiv = 1}
+    else                            {tmpDiv = 0}
+    if ( inNum.last._1 < addMax ){ inNum :+ (1, inNum.last._1, inNum.last._1+(inNum.last._1/addMax)+1 ) }
+    else{ AddDiv( inNum :+ ( (inNum.last._1/addMax)+tmpDiv, (inNum.last._1)%addMax, inNum.last._1+inNum.last._3 )) }
   }
 
-  val allS: Seq[Int] = AddDiv(Seq.fill(1)(volumeIntegratorParams.inputNumber/4+1))
-  val allSDiv =
+  val io: VolumeIntegratorBundle = IO(new VolumeIntegratorBundle)
+  val allS: Seq[(Int, Int, Int)] = AddDiv( Seq.fill(1)( (volumeIntegratorParams.inputNumber, 0, 0) ) ).tail
+  val allSReg: Vec[UInt] = RegInit(VecInit(Seq.fill( allS.map({ case(_1,_,_) => _1 }).sum )(0.U(volumeIntegratorParams.bitMax.W))))
+  val regFirst: Int = allS.head._1
 
-  val adderSWire: Seq[UInt] = Seq.fill(allS.sum + volumeIntegratorParams.inputNumber)(Wire(UInt((volumeIntegratorParams.inputBits+volumeIntegratorParams.addMax*allS.size).W)))
-  val adderSReg: Seq[UInt] = Seq.fill(allS.sum)(RegInit(0.U(volumeIntegratorParams.inputBits.W)))
+//   println(allS)
+//   println(allSReg)
 
-//  allS.zipWithIndex.foreach { case(inNum, inIndex) =>
-//    (0 until inNum-1).zipWithIndex.foreach{ case (in1, in2) =>
-//      (0 until volumeIntegratorParams.addMax).foreach{ x =>
-//        adderSReg(inNum) += adderSWire(in1*4 + x)
-//      }
-//    }
-//  }
+  var allRegNow : Int = 0
+  var allRegPrev = 0
 
-//  alls : 26, 7, 2
-//  adderSWire : 101+26+7+2
-//  adderSReg  : 26 + 7 + 2
-
-  allS.zipWithIndex.foreach { case(allSNum, allSIndex) =>
-    (0 until volumeIntegratorParams.addMax).foreach{ prevWire =>
-      (0 until allSNum-1).foreach{ nowWire =>
-        if (allSIndex > 1){
-            adderSReg(allS(allSIndex)+nowWire) += adderSWire( (allS(allSIndex)-1)*4 + nowWire*4 + prevWire)
-          }else{
-            adderSReg(nowWire) += adderSWire(nowWire*4+prevWire)
-        }
-      }
+  allS.tail.indices.foreach({ allSNum =>
+    if (allSNum == 0) {
+      allRegNow = regFirst
+      allRegPrev = 0
     }
-    (0 until )
-    if (allSIndex > 1){
-      adderSReg(allSNum) += adderSWire( (allS(allSIndex)-1)*4 + nowWire*4 + prevWire)
+    else {
+      allRegNow = (0 until allSNum+1).map({x:Int => allS(x)._1}).sum
+      allRegPrev = (0 until allSNum).map({x:Int => allS(x)._1}).sum
+    }
+    (0 until allS(allSNum+1)._1-1).foreach({ allSRegNum =>
+      allSReg(allRegNow + allSRegNum) := (0 until addMax).map({ x => allSReg(allRegPrev+allSRegNum*10+x) }).reduce(_+&_)
+    })
+    if( allS(allSNum+1)._2 == 0 ){
+      allSReg(allRegNow + allS(allSNum+1)._1-1) := (0 until addMax).map({ x => allSReg(allRegPrev+(allS(allSNum+1)._1-1)*10+x) }).reduce(_+&_)
     }else{
-      adderSReg(nowWire) += adderSWire(nowWire*4+prevWire)
+      allSReg(allRegNow + allS(allSNum+1)._1-1) := (0 until allS(allSNum+1)._2).map({ x =>
+        allSReg( allRegPrev+allS(allSNum+1)._1*10 - addMax + x ) }).reduce(_+&_)
     }
-  }
+  })
+
+  (0 until allS.head._1).foreach( x => allSReg(x) := (0 until addMax).map({ y => io.in(x*addMax + y)}).reduce(_+&_) )
+
+  val bufferReg: GripperInDelayNCycles[UInt] = Module(new GripperInDelayNCycles(data = UInt(volumeIntegratorParams.bitMax.W), gripper = volumeIntegratorParams.timemainFactor)())
+
+  bufferReg.io.in := allSReg.last
+  io.out := bufferReg.io.out / (volumeIntegratorParams.divMax.U)
 
 
 }
@@ -70,5 +95,5 @@ class VolumeIntegrator(volumeIntegratorParams:VolumeIntegratorParams) extends Mo
 
 object yohan_VolumeIntegrator extends App{
   println("Starting generate")
-  (new ChiselStage).emitVerilog(new VolumeIntegrator( VolumeIntegratorParams(maxWaveHeight=10, inputNumber=5, timemainFactor=4) ) )
+  (new ChiselStage).emitVerilog(new VolumeIntegrator( VolumeIntegratorParams(maxWaveHeight=10, inputNumber=30, timemainFactor=4) ) )
 }
