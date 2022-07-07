@@ -10,11 +10,11 @@ import chisel3.util._
 //(960 x 480) x 24bits
 //=> 960 x (480 x 24) bits
 case class IntellectualCCTVParams(
-                                   videoWidth:Int = 960,
-                                   videoHeight:Int = 480,
+                                   videoWidth:Int = 96,
+                                   videoHeight:Int = 48,
                                    colorDomain:Int = 3,
                                    colorScale:Int = 8 /**256bit*/,
-                                   hardfixFrameCoefficient:Int = 50,
+                                   hardfixFrameCoefficient:Int = 15,
                                    hardfixL1NormSensitivityThreshold:Int = 20,
                                    hardfixFrameSensitivityThreshold:Int = 15
                                  )
@@ -120,9 +120,11 @@ class IntellectualCCTV(intellectualCCTVParams:IntellectualCCTVParams) extends Mo
   val baseCountMem: Counter = Counter(intellectualCCTVParams.oneFrame)
 
   ////////////////////////////////////////////////////////  base Reg
-  val inVideoPixel: UInt = Wire(io.videoInput(intellectualCCTVParams.pixel-1 , 0))
+  val inVideoPixel: UInt = io.videoInput(intellectualCCTVParams.pixel-1 , 0)
   val basePixel: Vec[UInt] = RegInit(VecInit(Seq.fill(intellectualCCTVParams.oneFrame*intellectualCCTVParams.hardfixFrameCoefficient)(0.U(intellectualCCTVParams.pixel.W))))
   val regEnable: Vec[Bool] = VecInit( Seq.fill(intellectualCCTVParams.oneFrame)(false.B))
+
+  println(basePixel)
 
   regEnable.zipWithIndex.foreach({ case( value, index) =>
     when(value === true.B){
@@ -133,15 +135,15 @@ class IntellectualCCTV(intellectualCCTVParams:IntellectualCCTVParams) extends Mo
     }
   })
 
-  val sumReg: Seq[UInt] = VecInit(Seq.fill(intellectualCCTVParams.oneFrameColor)( Wire(0.U((intellectualCCTVParams.pixel).W))))
+  val sumReg: Seq[UInt] = VecInit(Seq.fill(intellectualCCTVParams.oneFrameColor)( 0.U((intellectualCCTVParams.pixel).W)))
   for( i <- 0 until intellectualCCTVParams.oneFrame){
     val nowReg: Seq[UInt] = (0 until intellectualCCTVParams.hardfixFrameCoefficient).map({ x =>
+      println(i+x)
       basePixel(i+x)
     })
     for (ii <- 0 until intellectualCCTVParams.colorDomain){
-      val tmp: Int = i*intellectualCCTVParams.colorDomain + ii
       sumReg(i*intellectualCCTVParams.colorDomain + ii) := nowReg.map({ value =>
-        value((ii+1)*intellectualCCTVParams,ii*intellectualCCTVParams.colorScale)
+        value((ii+1)*intellectualCCTVParams.colorScale,ii*intellectualCCTVParams.colorScale)
       }).reduce(_+&_)/intellectualCCTVParams.hardfixFrameCoefficient.U
     }
   }
@@ -232,7 +234,7 @@ class IntellectualCCTV(intellectualCCTVParams:IntellectualCCTVParams) extends Mo
     }
     is(State.sResult){
       memRead.inc()
-      io.getResult := memAll.read(memRead.value)
+      io.Output2 := memAll.read(memRead.value)
       when(memRead.value === memNow.value*intellectualCCTVParams.oneFrame.U){
         resultCountMem := true.B
       }
