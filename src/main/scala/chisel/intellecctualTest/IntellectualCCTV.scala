@@ -93,13 +93,70 @@ class IntellectualCCTV(intellectualCCTVParams:IntellectualCCTVParams) extends Mo
   //////////////////////////////////////////////////////////////////////// action Code
   //////////////////////////////////////////////////////////////////////// action Code
 
-  val basePixel: Vec[UInt] = RegInit(VecInit(Seq.fill(intellectualCCTVParams.oneFrameColor*intellectualCCTVParams.hardfixFrameCoefficient)(0.U(intellectualCCTVParams.colorScale.W))))
+  val baseCount: Counter = Counter(intellectualCCTVParams.oneFrame)
+
+  ////////////////////////////////////////////////////////  base Reg
+  val inVideoPixel: UInt = Wire(io.videoInput(intellectualCCTVParams.pixel-1 , 0))
+  val basePixel: Vec[UInt] = RegInit(VecInit(Seq.fill(intellectualCCTVParams.oneFrame*intellectualCCTVParams.hardfixFrameCoefficient)(0.U(intellectualCCTVParams.pixel.W))))
   val regEnable: Vec[Bool] = VecInit( Seq.fill(intellectualCCTVParams.oneFrame)(false.B))
 
-  regEnable.
+  regEnable.zipWithIndex.foreach({ case( value, index) =>
+    when(value === true.B){
+      basePixel(index) := inVideoPixel
+      for(i <- 0 until  intellectualCCTVParams.hardfixFrameCoefficient){
+        basePixel(i+1+index) := basePixel(i+index)
+      }
+    }
+  })
+
+  val sumReg: Seq[UInt] = VecInit(Seq.fill(intellectualCCTVParams.oneFrameColor)( Wire(0.U((intellectualCCTVParams.pixel+intellectualCCTVParams.colorDomain).W))))
+  for( i <- 0 until intellectualCCTVParams.oneFrame){
+    val nowReg: Seq[UInt] = (0 until intellectualCCTVParams.hardfixFrameCoefficient).map({ x =>
+      basePixel(i+x)
+    })
+    for (ii <- 0 until intellectualCCTVParams.colorDomain){
+      val tmp: Int = i*intellectualCCTVParams.colorDomain + ii
+      sumReg(i*intellectualCCTVParams.colorDomain + ii) := nowReg.map({ value =>
+        value((ii+1)*intellectualCCTVParams,ii*intellectualCCTVParams.colorScale)
+      }).reduce(_+&_)/intellectualCCTVParams.hardfixFrameCoefficient.U
+    }
+  }
+
+  ////////////////////////////////////////////////////////  Charge Reg
+  when(basePixel.last =/= 0.U){
+    chargeIn := true.B
+  }
+
+  ////////////////////////////////////////////////////////  Diff Reg
+  val diffReg: Vec[UInt] = RegInit(VecInit(Seq.fill(intellectualCCTVParams.oneFrame)(0.U(intellectualCCTVParams.pixel.W))))
+  val diffValue = WireInit(0.U((intellectualCCTVParams.pixel+intellectualCCTVParams.colorDomain).W))
+  val absDiffValue = WireInit(0.U((intellectualCCTVParams.pixel+intellectualCCTVParams.colorDomain).W))
+
+  val now_av: UInt = MuxLookup(baseCount.value, 0.U, (0 until intellectualCCTVParams.oneFrame).map({ x =>
+    (x.U, basePixel(x))
+  }))
+
+  diffValue := inVideoPixel - now_av
+  absDiffValue := diffValue
+  when(diffValue(intellectualCCTVParams.pixel+intellectualCCTVParams.colorDomain-1) === 1.U){
+    absDiffValue := !diffValue
+  }
 
   switch(state){
+    is(State.sIdle){
+      baseCount.reset()
+    }
     is(State.sCharge){
+      baseCount.inc()
+      regEnable.zipWithIndex.foreach({ case( value, index) =>
+        when(index.U(intellectualCCTVParams.oneFrame.W) === baseCount.value){
+          value := true.B
+        }.otherwise{
+          value := false.B
+        }
+      })
+    }
+    is(State.sRead){
 
     }
   }
