@@ -10,11 +10,11 @@ import chisel3.util._
 //(960 x 480) x 24bits
 //=> 960 x (480 x 24) bits
 case class IntellectualCCTVParams(
-                                   videoWidth:Int = 96,
-                                   videoHeight:Int = 48,
+                                   videoWidth:Int = 8,
+                                   videoHeight:Int = 4,
                                    colorDomain:Int = 3,
                                    colorScale:Int = 8 /**256bit*/,
-                                   hardfixFrameCoefficient:Int = 15,
+                                   hardfixFrameCoefficient:Int = 5,
                                    hardfixL1NormSensitivityThreshold:Int = 20,
                                    hardfixFrameSensitivityThreshold:Int = 15
                                  )
@@ -138,8 +138,8 @@ class IntellectualCCTV(intellectualCCTVParams:IntellectualCCTVParams) extends Mo
   val sumReg: Seq[UInt] = VecInit(Seq.fill(intellectualCCTVParams.oneFrameColor)( 0.U((intellectualCCTVParams.pixel).W)))
   for( i <- 0 until intellectualCCTVParams.oneFrame){
     val nowReg: Seq[UInt] = (0 until intellectualCCTVParams.hardfixFrameCoefficient).map({ x =>
-      println(i+x)
-      basePixel(i+x)
+      print(s"${i}+x  ")
+      basePixel(i+x*intellectualCCTVParams.oneFrame)
     })
     for (ii <- 0 until intellectualCCTVParams.colorDomain){
       sumReg(i*intellectualCCTVParams.colorDomain + ii) := nowReg.map({ value =>
