@@ -62,7 +62,7 @@ class IntellectualCCTV(intellectualCCTVParams:IntellectualCCTVParams) extends Mo
   }
 
   object State extends ChiselEnum {
-    val sIdle, sResult ,sAction, sDiff, sCharge, sRead = Value
+    val sIdle, sReset, sResult ,sAction, sDiff, sCharge, sRead = Value
   }
   val state: State.Type = RegInit(State.sIdle)
 
@@ -105,8 +105,11 @@ class IntellectualCCTV(intellectualCCTVParams:IntellectualCCTVParams) extends Mo
     }
     is(State.sResult){
       when(resultCountMem === true.B){
-        state := State.sIdle
+        state := State.sReset
       }
+    }
+    is(State.sReset){
+      state := State.sIdle
     }
   }
 
@@ -159,7 +162,9 @@ class IntellectualCCTV(intellectualCCTVParams:IntellectualCCTVParams) extends Mo
   }))
 
   ////////////////////////////////////////////////////////  Mem
-  val memAll: SyncReadMem[UInt] = SyncReadMem(intellectualCCTVParams.oneFrame, UInt(intellectualCCTVParams.oneFrame.W))
+  val memAll: SyncReadMem[UInt] = SyncReadMem(intellectualCCTVParams.oneFrame*1000, UInt(intellectualCCTVParams.oneFrame.W))
+  val memNow: Counter = Counter(1000)
+  val memRead: Counter = Counter(1000)
 
   (0 until intellectualCCTVParams.colorDomain).foreach({ x =>
     val indexHead = (x+1)*intellectualCCTVParams.colorScale
@@ -174,6 +179,7 @@ class IntellectualCCTV(intellectualCCTVParams:IntellectualCCTVParams) extends Mo
     is(State.sIdle){
       baseCount.reset()
       baseCountMem.reset()
+      memRead.reset()
     }
     is(State.sCharge){
       baseCount.inc()
@@ -208,6 +214,7 @@ class IntellectualCCTV(intellectualCCTVParams:IntellectualCCTVParams) extends Mo
       when( diffReg.reduce(_+&_) > intellectualCCTVParams.hardfixL1NormSensitivityThreshold.U ){
         diffThreshold := true.B
         stateGet := StateGet.sGet
+        memNow.inc()
       }
     }
     is(State.sAction){
@@ -221,10 +228,14 @@ class IntellectualCCTV(intellectualCCTVParams:IntellectualCCTVParams) extends Mo
         (index.U, value)
       }))
 
-      memAll.write(baseCountMem.value, now_Reg)
+      memAll.write(baseCountMem.value, now_Reg + (memNow.value-1.U)*intellectualCCTVParams.oneFrame.U)
     }
     is(State.sResult){
-
+      memRead.inc()
+      io.getResult := memAll.read(memRead.value)
+      when(memRead.value === memNow.value*intellectualCCTVParams.oneFrame.U){
+        resultCountMem := true.B
+      }
     }
   }
 
